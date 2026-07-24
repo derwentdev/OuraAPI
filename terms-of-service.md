@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last updated:** [DATE]
+**Last updated:** 23-JUL-26
 
 ## Acceptance of terms
 
@@ -32,4 +32,4 @@ You may revoke the App's access to your Oura account at any time through your Ou
 
 ## Contact
 
-Questions about these terms can be directed to: [CONTACT EMAIL]
+Questions about these terms can be directed to: matthew.nermoe@gmail.com
