@@ -45,6 +45,8 @@ def get_access_token():
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
     })
+    if not resp.ok:
+        print(f"[oura] refresh_token exchange failed ({resp.status_code}): {resp.text}")
     resp.raise_for_status()
     tokens = resp.json()
     _token_cache["access_token"] = tokens["access_token"]
