@@ -7,9 +7,13 @@ Exposes your Oura recovery data as tools an MCP-compatible AI client
 ENVIRONMENT VARIABLES (set these in Render, not in this file):
   OURA_CLIENT_ID       - from the Oura developer portal
   OURA_CLIENT_SECRET   - from the Oura developer portal
-  OURA_REFRESH_TOKEN   - obtained once via oura_recovery.py (see README)
+  OURA_REFRESH_TOKEN   - obtained once via oura_recovery.py (see README);
+                          only used the very first time, before Upstash has
+                          a saved token
   MCP_API_KEY           - a secret you make up; Claude must send this to
                           prove it's allowed to call your server
+  UPSTASH_REDIS_REST_URL   - from your Upstash database's REST API section
+  UPSTASH_REDIS_REST_TOKEN - from your Upstash database's REST API section
 """
 
 import os
@@ -26,12 +30,52 @@ CLIENT_ID = os.environ["OURA_CLIENT_ID"]
 CLIENT_SECRET = os.environ["OURA_CLIENT_SECRET"]
 API_KEY = os.environ.get("MCP_API_KEY")
 
+UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+REFRESH_TOKEN_KEY = "oura_refresh_token"
+
 TOKEN_URL = "https://api.ouraring.com/oauth/token"
 API_BASE = "https://api.ouraring.com/v2/usercollection"
 
+
+def upstash_get(key):
+    if not UPSTASH_URL:
+        return None
+    try:
+        resp = requests.get(
+            f"{UPSTASH_URL}/get/{key}",
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("result")
+    except Exception as e:
+        print(f"[upstash] get failed: {e}")
+        return None
+
+
+def upstash_set(key, value):
+    if not UPSTASH_URL:
+        return
+    try:
+        resp = requests.post(
+            f"{UPSTASH_URL}/set/{key}",
+            headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+            json=value,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"[upstash] set failed: {e}")
+
+
+_saved_refresh_token = upstash_get(REFRESH_TOKEN_KEY)
+if _saved_refresh_token:
+    print("[oura] loaded refresh token from Upstash (persisted from a previous run)")
+else:
+    print("[oura] no saved refresh token found in Upstash, using OURA_REFRESH_TOKEN env var")
+
 _token_cache = {
     "access_token": None,
-    "refresh_token": os.environ["OURA_REFRESH_TOKEN"],
+    "refresh_token": _saved_refresh_token or os.environ["OURA_REFRESH_TOKEN"],
     "expires_at": 0,
 }
 
@@ -50,7 +94,11 @@ def get_access_token():
     resp.raise_for_status()
     tokens = resp.json()
     _token_cache["access_token"] = tokens["access_token"]
-    _token_cache["refresh_token"] = tokens.get("refresh_token", _token_cache["refresh_token"])
+    new_refresh_token = tokens.get("refresh_token", _token_cache["refresh_token"])
+    if new_refresh_token != _token_cache["refresh_token"]:
+        _token_cache["refresh_token"] = new_refresh_token
+        upstash_set(REFRESH_TOKEN_KEY, new_refresh_token)
+        print("[oura] refresh token rotated, saved new one to Upstash")
     _token_cache["expires_at"] = time.time() + tokens.get("expires_in", 3600)
     return _token_cache["access_token"]
 
