@@ -245,6 +245,9 @@ def _load_access_tokens():
     except (TypeError, ValueError):
         print("[oauth] could not parse saved access tokens, starting fresh")
         return {}
+    if not isinstance(saved, dict):
+        print(f"[oauth] saved access tokens were not a dict (got {type(saved).__name__}), starting fresh")
+        return {}
     now = time.time()
     # Drop anything already expired instead of carrying it forward forever.
     valid = {tok: rec for tok, rec in saved.items() if rec.get("expires_at", 0) > now}
