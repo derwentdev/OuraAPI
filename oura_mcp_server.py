@@ -60,7 +60,11 @@ def api_get(endpoint, params):
         headers={"Authorization": f"Bearer {token}"},
         params=params,
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError:
+        print(f"[oura] could not fetch '{endpoint}' (status {resp.status_code}), skipping")
+        return []
     return resp.json().get("data", [])
 
 
