@@ -77,6 +77,52 @@ Check that your server's 401 response on `/mcp` includes a
 know where to send the user to log in and may just report a generic
 connection failure instead.
 
+## Claude keeps asking for MCP_API_KEY again and again
+This means the bearer token Claude received after logging in isn't
+surviving server restarts. Confirm:
+1. Your server persists issued access tokens to Upstash (not just
+   in-memory), and loads them back on startup.
+2. Check Render logs on startup for `[oauth] loaded N valid access
+   token(s) from Upstash` — if it instead says "no saved access tokens
+   found," something is preventing the save (check for `[upstash] set
+   failed` errors) or the data got corrupted (see next entry).
+
+## `AttributeError: 'str' object has no attribute 'items'` on startup
+This means data saved to Upstash got double-JSON-encoded and can't be
+read back as the dict it should be. The root cause: Upstash's REST API
+expects the raw value as the request body (`data=value` in Python's
+`requests` library), not wrapped in another layer of encoding
+(`json=value`). If you manually `json.dumps()` a value before saving,
+make sure the save function isn't *also* JSON-encoding it — that
+double-encodes it, and reading it back gives you a string instead of
+the dict you expect.
+
+Fix: correct the encoding in the save function going forward, then
+manually delete the corrupted key in Upstash's Data Browser (deleting
+just that one key, not everything) and let the server write a clean
+version on next use. As a safety net, load functions should check
+`isinstance(saved, dict)` after parsing and reset to a fresh empty value
+with a logged warning if the shape is wrong — rather than crashing the
+whole server on a bad value.
+
+## Same Oura error, but only when two chats use the connector at once
+If you're confident credentials are fine and the failure only shows up
+under concurrent use, this is likely a race condition: two requests
+both found the cached access token expired at the same moment and both
+tried to refresh simultaneously. Oura's refresh tokens are single-use,
+so the second request invalidates itself. Fix: wrap the refresh logic
+in a lock so concurrent callers wait for one refresh to finish and reuse
+its result instead of racing each other.
+
+## Deleted a value in Upstash and now nothing works
+Only delete a key in Upstash if you're deliberately re-seeding it from
+an environment variable — Upstash generally holds the *most current*
+value (rotated forward from whatever's in Render's env vars), so
+deleting it reverts to an older, likely-already-invalidated value. If
+you do need to reset, you'll need to do one more full fresh
+authorization locally and sync the result back to both Render's env var
+and, implicitly, Upstash (it'll re-save on first successful use).
+
 ## Changes don't seem to take effect after redeploying
 The most common cause is the file upload not actually overwriting the
 existing file on GitHub (creates a duplicate instead if the filename
